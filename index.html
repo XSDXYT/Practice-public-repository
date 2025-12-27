@@ -13,7 +13,7 @@
     .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
     .card { background: #0f141b; border: 1px solid #1f2a36; border-radius: 14px; padding: 12px; }
     label { font-size: 12px; opacity: 0.9; display: block; margin-bottom: 6px; }
-    input[type="date"], input[type="file"], input[type="text"], select {
+    input[type="date"], input[type="file"], input[type="text"] {
       width: 100%; box-sizing: border-box;
       background: #0b0f14; color: #e8eef6;
       border: 1px solid #273447; border-radius: 10px;
@@ -132,60 +132,6 @@
     return `${y}-${m}-${day}`;
   }
 
-
-  // 获取北京时间的日期/时间部件（不依赖用户电脑时区）
-  function getBeijingParts(now = new Date()) {
-    const fmt = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Shanghai",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
-    const parts = {};
-    for (const p of fmt.formatToParts(now)) {
-      if (p.type !== "literal") parts[p.type] = p.value;
-    }
-    return {
-      year: Number(parts.year),
-      month: Number(parts.month),
-      day: Number(parts.day),
-      hour: Number(parts.hour),
-      minute: Number(parts.minute),
-      second: Number(parts.second),
-    };
-  }
-
-  // 国服重置：北京时间 08:00。把“游戏日期”定义为：北京时间 < 08:00 时算前一天。
-  function getGw2CnGameDateStr(now = new Date()) {
-    const p = getBeijingParts(now);
-    // 用 UTC Date 承载“北京时间”的年月日时分秒，方便做日期加减
-    const d = new Date(Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second));
-    if (p.hour < 8) d.setUTCDate(d.getUTCDate() - 1);
-    // 输出 YYYY-MM-DD（使用 UTC 取值，避免本地时区影响）
-    const y = d.getUTCFullYear();
-    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(d.getUTCDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  }
-
-  // 计算距离下一个北京时间 08:00 还有多久（毫秒）
-  function msUntilNextCnReset(now = new Date()) {
-    const p = getBeijingParts(now);
-    const todayResetUtc = Date.UTC(p.year, p.month - 1, p.day, 8, 0, 0);
-    const nowUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
-    let next = todayResetUtc;
-    if (nowUtc >= todayResetUtc) {
-      const tmp = new Date(todayResetUtc);
-      tmp.setUTCDate(tmp.getUTCDate() + 1);
-      next = tmp.getTime();
-    }
-    return Math.max(0, next - nowUtc);
-  }
-
   function toLocalDateFromInput(value) {
     // value: "YYYY-MM-DD"
     const [y,m,d] = value.split("-").map(Number);
@@ -196,78 +142,6 @@
     // a,b are Date at midnight local
     const ms = 24*60*60*1000;
     return Math.round((a.getTime() - b.getTime()) / ms);
-  }
-
-
-  // 基于 YYYY-MM-DD 做日期加减
-  function addDaysToDateStr(dateStr, deltaDays) {
-    const d = toLocalDateFromInput(dateStr);
-    d.setDate(d.getDate() + deltaDays);
-    return fmtDate(d);
-  }
-
-  function setDatePickValue(dateStr, { manual = true } = {}) {
-    suppressDateChangeFlag = true;
-    $("datePick").value = dateStr;
-    suppressDateChangeFlag = false;
-    if (manual) userManualDate = true;
-    render();
-    refreshQuickJumpOptions();
-  }
-
-  function setFollowCnResetToday() {
-    userManualDate = false;
-    lastAutoDateStr = getGw2CnGameDateStr(new Date());
-    suppressDateChangeFlag = true;
-    $("datePick").value = lastAutoDateStr;
-    suppressDateChangeFlag = false;
-    render();
-    refreshQuickJumpOptions();
-  }
-
-  function refreshQuickJumpOptions() {
-    const sel = $("quickJump");
-    if (!sel) return;
-
-    const gameToday = getGw2CnGameDateStr(new Date());
-    const current = $("datePick").value || gameToday;
-
-    const prev = sel.value;
-    sel.innerHTML = "";
-
-    const optFollow = document.createElement("option");
-    optFollow.value = "__FOLLOW__";
-    optFollow.textContent = "跟随国服 08:00 自动（推荐）";
-    sel.appendChild(optFollow);
-
-    for (let i = -14; i <= 14; i++) {
-      const d = addDaysToDateStr(gameToday, i);
-      const opt = document.createElement("option");
-      opt.value = d;
-      let tag = "";
-      if (i === 0) tag = "（游戏今天）";
-      else if (i === 1) tag = "（游戏明天）";
-      else if (i === -1) tag = "（游戏昨天）";
-      opt.textContent = `${d} ${tag}`.trim();
-      sel.appendChild(opt);
-    }
-
-    if (!userManualDate) {
-      sel.value = "__FOLLOW__";
-    } else {
-      sel.value = current;
-      if (sel.value !== current) {
-        const opt = document.createElement("option");
-        opt.value = current;
-        opt.textContent = `${current}（当前）`;
-        sel.insertBefore(opt, sel.children[1]);
-        sel.value = current;
-      }
-    }
-
-    if (prev && Array.from(sel.options).some(o => o.value === prev)) {
-      sel.value = prev;
-    }
   }
 
   // -------------------------
@@ -382,91 +256,33 @@
     out.appendChild(wrapper);
 
     // status
-    $("status").innerHTML = `状态：<span class="ok">已加载 instabilities.json</span>` + (fractData ? `，<span class="ok">已加载 fractals.json</span>` : `，<span class="warn">未加载 fractals.json（仅显示英文碎层名）</span>`) + (zhDict ? `，<span class="ok">已加载 zh_dict.json</span>` : `，<span class="warn">未加载 zh_dict.json（不显示中文）</span>`);
+    $("status").innerHTML = `状态：<span class="ok">已加载 instabilities.json</span>` + (fractData ? `，<span class="ok">已加载 fractals.json</span>` : `，<span class="warn">未加载 fractals.json（仅显示 Scale）</span>`);
   }
 
   // -------------------------
   // Wire up UI
   // -------------------------
   (function init() {
-    // default date = CN reset "game day"
-    lastAutoDateStr = getGw2CnGameDateStr(new Date());
+    // default date = today
     const now = new Date();
-    suppressDateChangeFlag = true;
-    $("datePick").value = lastAutoDateStr;
-    suppressDateChangeFlag = false;
-// default anchor = 2023-12-31
+    $("datePick").value = fmtDate(now);
+
+    // default anchor = 2023-12-31
     $("anchorPick").value = "2023-12-31";
 
     $("btnToday").addEventListener("click", () => {
-      setFollowCnResetToday();
+      $("datePick").value = fmtDate(new Date());
+      render();
     });
 
     $("btnTomorrow").addEventListener("click", () => {
-      // 以“游戏今天”为基准 +1 天
-      const baseStr = getGw2CnGameDateStr(new Date());
-      const base = toLocalDateFromInput(baseStr);
-      base.setDate(base.getDate() + 1);
-      suppressDateChangeFlag = true;
-      $("datePick").value = fmtDate(base);
-      suppressDateChangeFlag = false;
-      userManualDate = true;
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      $("datePick").value = fmtDate(d);
       render();
     });
 
-
-    $("btnPrev").addEventListener("click", () => {
-      const cur = $("datePick").value || getGw2CnGameDateStr(new Date());
-      setDatePickValue(addDaysToDateStr(cur, -1), { manual: true });
-    });
-
-    $("btnNext").addEventListener("click", () => {
-      const cur = $("datePick").value || getGw2CnGameDateStr(new Date());
-      setDatePickValue(addDaysToDateStr(cur, +1), { manual: true });
-    });
-
-    $("btnPrev7").addEventListener("click", () => {
-      const cur = $("datePick").value || getGw2CnGameDateStr(new Date());
-      setDatePickValue(addDaysToDateStr(cur, -7), { manual: true });
-    });
-
-    $("btnNext7").addEventListener("click", () => {
-      const cur = $("datePick").value || getGw2CnGameDateStr(new Date());
-      setDatePickValue(addDaysToDateStr(cur, +7), { manual: true });
-    });
-
-    $("quickJump").addEventListener("change", (e) => {
-      const v = e.target.value;
-      if (v === "__FOLLOW__") {
-        setFollowCnResetToday();
-      } else {
-        setDatePickValue(v, { manual: true });
-      }
-    });
-
-    // 键盘快捷键：←/→ 前后一天；Shift+←/→ 前后 7 天
-    document.addEventListener("keydown", (e) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const key = e.key;
-      if (key !== "ArrowLeft" && key !== "ArrowRight") return;
-
-      const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : "";
-      const isTyping = tag === "input" || tag === "textarea";
-      if (isTyping && e.target.id !== "datePick") return;
-
-      const delta = (key === "ArrowLeft" ? -1 : +1) * (e.shiftKey ? 7 : 1);
-      const cur = $("datePick").value || getGw2CnGameDateStr(new Date());
-      setDatePickValue(addDaysToDateStr(cur, delta), { manual: true });
-      e.preventDefault();
-    });
-
-    refreshQuickJumpOptions();
-
-    $("datePick").addEventListener("change", () => {
-      if (!suppressDateChangeFlag) userManualDate = true;
-      render();
-      refreshQuickJumpOptions();
-    });
+    $("datePick").addEventListener("change", render);
     $("anchorPick").addEventListener("change", render);
 
     $("fileInst").addEventListener("change", async (e) => {
@@ -511,102 +327,35 @@
     
 
     async function autoLoadJson() {
-      // 多路径尝试：解决项目页 /repo/ 与用户页 / 的相对路径差异
-      const origin = window.location.origin;
-      const parts = window.location.pathname.split("/").filter(Boolean);
-      const repoBase = parts.length ? `/${parts[0]}/` : "/"; // project pages: /repo/..., user pages: /
-      const dirBase = new URL(".", window.location.href);    // 当前页面所在目录
+      // 同目录文件：GitHub Pages 下就是 /gw2-instabilities/instabilities.json 这种
+      const instUrl = "./instabilities.json";
+      const fractUrl = "./fractals.json";
+      const zhUrl = "./zh_dict.json";
 
-      const candidates = (filename) => ([
-        new URL(filename, dirBase).toString(),              // 当前目录
-        new URL("./" + filename, dirBase).toString(),       // 当前目录（显式）
-        origin + repoBase + filename,                       // 仓库根目录（project pages 兼容）
-        origin + "/" + filename,                            // 站点根目录（user pages 兼容）
-      ]);
+      try {
+        const r1 = await fetch(instUrl, { cache: "no-store" });
+        if (!r1.ok) throw new Error("instabilities.json 读取失败：" + r1.status);
+        instData = await r1.json();
 
-      async function fetchJsonWithCandidates(filename) {
-        const urls = candidates(filename);
-        let lastErr = null;
+        // fractals.json 可选，失败也不影响查异变
+        try {
+          const r2 = await fetch(fractUrl, { cache: "no-store" });
+          if (r2.ok) fractData = await r2.json();
+        } catch (_) {}
 
-        for (const url of urls) {
-          try {
-            const r = await fetch(url, { cache: "no-store" });
-            if (!r.ok) {
-              lastErr = new Error(`${filename} 读取失败：HTTP ${r.status}（${url}）`);
-              continue;
-            }
-            const text = await r.text();
-            try {
-              const data = JSON.parse(text);
-              return { ok: true, url, data };
-            } catch (e) {
-              lastErr = new Error(`${filename} JSON 解析失败：${e.message}（${url}）`);
-              continue;
-            }
-          } catch (e) {
-            lastErr = new Error(`${filename} 请求异常：${e.message}`);
-          }
-        }
+        // zh_dict.json 可选：中文映射
+        try {
+          const r3 = await fetch(zhUrl, { cache: "no-store" });
+          if (r3.ok) zhDict = await r3.json();
+        } catch (_) {}
 
-        return { ok: false, urls, error: lastErr };
-      }
-
-      // instabilities.json（必需）
-      const instRes = await fetchJsonWithCandidates("instabilities.json");
-      if (!instRes.ok) {
-        instData = null;
-        $("status").innerHTML =
-          `状态：<span class="err">未加载数据</span><br/>` +
-          `<span class="warn">${instRes.error ? instRes.error.message : "未知错误"}</span><br/>` +
-          `<span class="muted">尝试过的路径：</span><br/>` +
-          instRes.urls.map(u => `<span class="mono">${u}</span>`).join("<br/>");
         render();
-        return;
+      } catch (e) {
+        $("status").innerHTML = `状态：<span class="warn">自动加载失败</span>（可改用手动导入）`;
+        // 失败时不报错卡死，仍然允许你用“选择文件”导入
+        render();
       }
-      instData = instRes.data;
-
-      // fractals.json（可选）
-      const fractRes = await fetchJsonWithCandidates("fractals.json");
-      if (fractRes.ok) fractData = fractRes.data;
-
-      // zh_dict.json（可选）
-      const zhRes = await fetchJsonWithCandidates("zh_dict.json");
-      if (zhRes.ok) zhDict = zhRes.data;
-
-      const partsStatus = [];
-      partsStatus.push(`<span class="ok">已加载 instabilities.json</span>（<span class="mono">${instRes.url}</span>）`);
-      partsStatus.push(fractRes.ok
-        ? `<span class="ok">已加载 fractals.json</span>（<span class="mono">${fractRes.url}</span>）`
-        : `<span class="warn">未加载 fractals.json（不影响查询）</span>`);
-      partsStatus.push(zhRes.ok
-        ? `<span class="ok">已加载 zh_dict.json</span>（<span class="mono">${zhRes.url}</span>）`
-        : `<span class="warn">未加载 zh_dict.json（不显示中文）</span>`);
-
-      $("status").innerHTML = "状态：" + partsStatus.join("，");
-      render();
-    }
-
     } 
-
-
-    
-    // 到北京时间 08:00 自动“刷新今天”（仅当你当前处于“跟随重置”的状态）
-    function scheduleCnResetTick() {
-      const delay = msUntilNextCnReset(new Date()) + 250; // 加一点缓冲
-      setTimeout(() => {
-        // 只有当用户没有手动挑日期时，才自动跳到新的一天
-        if (!userManualDate) {
-          lastAutoDateStr = getGw2CnGameDateStr(new Date());
-          suppressDateChangeFlag = true;
-          $("datePick").value = lastAutoDateStr;
-          suppressDateChangeFlag = false;
-          render();
-          refreshQuickJumpOptions();
-        }
-        scheduleCnResetTick(); // 继续挂下一个 8 点
-      }, delay);
-    }
-    scheduleCnResetTick();
 
 
     autoLoadJson();   // 自动加载（在线使用）
