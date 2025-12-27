@@ -13,7 +13,7 @@
     .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
     .card { background: #0f141b; border: 1px solid #1f2a36; border-radius: 14px; padding: 12px; }
     label { font-size: 12px; opacity: 0.9; display: block; margin-bottom: 6px; }
-    input[type="date"], input[type="file"], input[type="text"] {
+    input[type="date"], input[type="file"], input[type="text"], select {
       width: 100%; box-sizing: border-box;
       background: #0b0f14; color: #e8eef6;
       border: 1px solid #273447; border-radius: 10px;
@@ -102,9 +102,7 @@
 </div>
 
 <div class="footer">
-  小贴士：
-  1) 离线：把 HTML 和 json 放在同目录，本地浏览器直接打开即可。
-  2) 在线（GitHub Pages）：同目录放置 instabilities.json / fractals.json / zh_dict.json 会自动加载并显示中文。
+  小贴士：祝您游戏愉快~
 </div>
 
 <script>
@@ -196,6 +194,78 @@
     // a,b are Date at midnight local
     const ms = 24*60*60*1000;
     return Math.round((a.getTime() - b.getTime()) / ms);
+  }
+
+
+  // 基于 YYYY-MM-DD 做日期加减
+  function addDaysToDateStr(dateStr, deltaDays) {
+    const d = toLocalDateFromInput(dateStr);
+    d.setDate(d.getDate() + deltaDays);
+    return fmtDate(d);
+  }
+
+  function setDatePickValue(dateStr, { manual = true } = {}) {
+    suppressDateChangeFlag = true;
+    $("datePick").value = dateStr;
+    suppressDateChangeFlag = false;
+    if (manual) userManualDate = true;
+    render();
+    refreshQuickJumpOptions();
+  }
+
+  function setFollowCnResetToday() {
+    userManualDate = false;
+    lastAutoDateStr = getGw2CnGameDateStr(new Date());
+    suppressDateChangeFlag = true;
+    $("datePick").value = lastAutoDateStr;
+    suppressDateChangeFlag = false;
+    render();
+    refreshQuickJumpOptions();
+  }
+
+  function refreshQuickJumpOptions() {
+    const sel = $("quickJump");
+    if (!sel) return;
+
+    const gameToday = getGw2CnGameDateStr(new Date());
+    const current = $("datePick").value || gameToday;
+
+    const prev = sel.value;
+    sel.innerHTML = "";
+
+    const optFollow = document.createElement("option");
+    optFollow.value = "__FOLLOW__";
+    optFollow.textContent = "跟随国服 08:00 自动（推荐）";
+    sel.appendChild(optFollow);
+
+    for (let i = -14; i <= 14; i++) {
+      const d = addDaysToDateStr(gameToday, i);
+      const opt = document.createElement("option");
+      opt.value = d;
+      let tag = "";
+      if (i === 0) tag = "（游戏今天）";
+      else if (i === 1) tag = "（游戏明天）";
+      else if (i === -1) tag = "（游戏昨天）";
+      opt.textContent = `${d} ${tag}`.trim();
+      sel.appendChild(opt);
+    }
+
+    if (!userManualDate) {
+      sel.value = "__FOLLOW__";
+    } else {
+      sel.value = current;
+      if (sel.value !== current) {
+        const opt = document.createElement("option");
+        opt.value = current;
+        opt.textContent = `${current}（当前）`;
+        sel.insertBefore(opt, sel.children[1]);
+        sel.value = current;
+      }
+    }
+
+    if (prev && Array.from(sel.options).some(o => o.value === prev)) {
+      sel.value = prev;
+    }
   }
 
   // -------------------------
@@ -318,8 +388,7 @@
   // -------------------------
   (function init() {
     // default date = CN reset "game day"
-    let suppressDateChangeFlag = false;
-    let lastAutoDateStr = getGw2CnGameDateStr(new Date());
+    lastAutoDateStr = getGw2CnGameDateStr(new Date());
     const now = new Date();
     suppressDateChangeFlag = true;
     $("datePick").value = lastAutoDateStr;
@@ -328,12 +397,7 @@
     $("anchorPick").value = "2023-12-31";
 
     $("btnToday").addEventListener("click", () => {
-      userManualDate = false; // 回到“跟随重置”的今天
-      lastAutoDateStr = getGw2CnGameDateStr(new Date());
-      suppressDateChangeFlag = true;
-      $("datePick").value = lastAutoDateStr;
-      suppressDateChangeFlag = false;
-      render();
+      setFollowCnResetToday();
     });
 
     $("btnTomorrow").addEventListener("click", () => {
@@ -348,11 +412,58 @@
       render();
     });
 
-    let userManualDate = false;
+
+    $("btnPrev").addEventListener("click", () => {
+      const cur = $("datePick").value || getGw2CnGameDateStr(new Date());
+      setDatePickValue(addDaysToDateStr(cur, -1), { manual: true });
+    });
+
+    $("btnNext").addEventListener("click", () => {
+      const cur = $("datePick").value || getGw2CnGameDateStr(new Date());
+      setDatePickValue(addDaysToDateStr(cur, +1), { manual: true });
+    });
+
+    $("btnPrev7").addEventListener("click", () => {
+      const cur = $("datePick").value || getGw2CnGameDateStr(new Date());
+      setDatePickValue(addDaysToDateStr(cur, -7), { manual: true });
+    });
+
+    $("btnNext7").addEventListener("click", () => {
+      const cur = $("datePick").value || getGw2CnGameDateStr(new Date());
+      setDatePickValue(addDaysToDateStr(cur, +7), { manual: true });
+    });
+
+    $("quickJump").addEventListener("change", (e) => {
+      const v = e.target.value;
+      if (v === "__FOLLOW__") {
+        setFollowCnResetToday();
+      } else {
+        setDatePickValue(v, { manual: true });
+      }
+    });
+
+    // 键盘快捷键：←/→ 前后一天；Shift+←/→ 前后 7 天
+    document.addEventListener("keydown", (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const key = e.key;
+      if (key !== "ArrowLeft" && key !== "ArrowRight") return;
+
+      const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : "";
+      const isTyping = tag === "input" || tag === "textarea";
+      if (isTyping && e.target.id !== "datePick") return;
+
+      const delta = (key === "ArrowLeft" ? -1 : +1) * (e.shiftKey ? 7 : 1);
+      const cur = $("datePick").value || getGw2CnGameDateStr(new Date());
+      setDatePickValue(addDaysToDateStr(cur, delta), { manual: true });
+      e.preventDefault();
+    });
+
+    refreshQuickJumpOptions();
 
     $("datePick").addEventListener("change", () => {
       if (!suppressDateChangeFlag) userManualDate = true;
       render();
+      refreshQuickJumpOptions();
     });
     $("anchorPick").addEventListener("change", render);
 
@@ -441,6 +552,7 @@
           $("datePick").value = lastAutoDateStr;
           suppressDateChangeFlag = false;
           render();
+          refreshQuickJumpOptions();
         }
         scheduleCnResetTick(); // 继续挂下一个 8 点
       }, delay);
