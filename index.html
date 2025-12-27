@@ -132,6 +132,60 @@
     return `${y}-${m}-${day}`;
   }
 
+
+  // 获取北京时间的日期/时间部件（不依赖用户电脑时区）
+  function getBeijingParts(now = new Date()) {
+    const fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Shanghai",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+    const parts = {};
+    for (const p of fmt.formatToParts(now)) {
+      if (p.type !== "literal") parts[p.type] = p.value;
+    }
+    return {
+      year: Number(parts.year),
+      month: Number(parts.month),
+      day: Number(parts.day),
+      hour: Number(parts.hour),
+      minute: Number(parts.minute),
+      second: Number(parts.second),
+    };
+  }
+
+  // 国服重置：北京时间 08:00。把“游戏日期”定义为：北京时间 < 08:00 时算前一天。
+  function getGw2CnGameDateStr(now = new Date()) {
+    const p = getBeijingParts(now);
+    // 用 UTC Date 承载“北京时间”的年月日时分秒，方便做日期加减
+    const d = new Date(Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second));
+    if (p.hour < 8) d.setUTCDate(d.getUTCDate() - 1);
+    // 输出 YYYY-MM-DD（使用 UTC 取值，避免本地时区影响）
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  // 计算距离下一个北京时间 08:00 还有多久（毫秒）
+  function msUntilNextCnReset(now = new Date()) {
+    const p = getBeijingParts(now);
+    const todayResetUtc = Date.UTC(p.year, p.month - 1, p.day, 8, 0, 0);
+    const nowUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+    let next = todayResetUtc;
+    if (nowUtc >= todayResetUtc) {
+      const tmp = new Date(todayResetUtc);
+      tmp.setUTCDate(tmp.getUTCDate() + 1);
+      next = tmp.getTime();
+    }
+    return Math.max(0, next - nowUtc);
+  }
+
   function toLocalDateFromInput(value) {
     // value: "YYYY-MM-DD"
     const [y,m,d] = value.split("-").map(Number);
@@ -256,33 +310,50 @@
     out.appendChild(wrapper);
 
     // status
-    $("status").innerHTML = `状态：<span class="ok">已加载 instabilities.json</span>` + (fractData ? `，<span class="ok">已加载 fractals.json</span>` : `，<span class="warn">未加载 fractals.json（仅显示 Scale）</span>`);
+    $("status").innerHTML = `状态：<span class="ok">已加载 instabilities.json</span>` + (fractData ? `，<span class="ok">已加载 fractals.json</span>` : `，<span class="warn">未加载 fractals.json（仅显示英文碎层名）</span>`) + (zhDict ? `，<span class="ok">已加载 zh_dict.json</span>` : `，<span class="warn">未加载 zh_dict.json（不显示中文）</span>`);
   }
 
   // -------------------------
   // Wire up UI
   // -------------------------
   (function init() {
-    // default date = today
+    // default date = CN reset "game day"
+    let suppressDateChangeFlag = false;
+    let lastAutoDateStr = getGw2CnGameDateStr(new Date());
     const now = new Date();
-    $("datePick").value = fmtDate(now);
-
-    // default anchor = 2023-12-31
+    suppressDateChangeFlag = true;
+    $("datePick").value = lastAutoDateStr;
+    suppressDateChangeFlag = false;
+// default anchor = 2023-12-31
     $("anchorPick").value = "2023-12-31";
 
     $("btnToday").addEventListener("click", () => {
-      $("datePick").value = fmtDate(new Date());
+      userManualDate = false; // 回到“跟随重置”的今天
+      lastAutoDateStr = getGw2CnGameDateStr(new Date());
+      suppressDateChangeFlag = true;
+      $("datePick").value = lastAutoDateStr;
+      suppressDateChangeFlag = false;
       render();
     });
 
     $("btnTomorrow").addEventListener("click", () => {
-      const d = new Date();
-      d.setDate(d.getDate() + 1);
-      $("datePick").value = fmtDate(d);
+      // 以“游戏今天”为基准 +1 天
+      const baseStr = getGw2CnGameDateStr(new Date());
+      const base = toLocalDateFromInput(baseStr);
+      base.setDate(base.getDate() + 1);
+      suppressDateChangeFlag = true;
+      $("datePick").value = fmtDate(base);
+      suppressDateChangeFlag = false;
+      userManualDate = true;
       render();
     });
 
-    $("datePick").addEventListener("change", render);
+    let userManualDate = false;
+
+    $("datePick").addEventListener("change", () => {
+      if (!suppressDateChangeFlag) userManualDate = true;
+      render();
+    });
     $("anchorPick").addEventListener("change", render);
 
     $("fileInst").addEventListener("change", async (e) => {
@@ -356,6 +427,25 @@
         render();
       }
     } 
+
+
+    
+    // 到北京时间 08:00 自动“刷新今天”（仅当你当前处于“跟随重置”的状态）
+    function scheduleCnResetTick() {
+      const delay = msUntilNextCnReset(new Date()) + 250; // 加一点缓冲
+      setTimeout(() => {
+        // 只有当用户没有手动挑日期时，才自动跳到新的一天
+        if (!userManualDate) {
+          lastAutoDateStr = getGw2CnGameDateStr(new Date());
+          suppressDateChangeFlag = true;
+          $("datePick").value = lastAutoDateStr;
+          suppressDateChangeFlag = false;
+          render();
+        }
+        scheduleCnResetTick(); // 继续挂下一个 8 点
+      }, delay);
+    }
+    scheduleCnResetTick();
 
 
     autoLoadJson();   // 自动加载（在线使用）
