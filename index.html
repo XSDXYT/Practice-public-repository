@@ -103,8 +103,8 @@
 
 <div class="footer">
   小贴士：
-  "1) 离线：把 HTML 和 json 放在同目录，本地浏览器直接打开即可。"
-  "2) 在线（GitHub Pages）：同目录放置 instabilities.json / fractals.json / zh_dict.json 会自动加载并显示中文。"
+  1) 离线：把 HTML 和 json 放在同目录，本地浏览器直接打开即可。
+  2) 在线（GitHub Pages）：同目录放置 instabilities.json / fractals.json / zh_dict.json 会自动加载并显示中文。
 </div>
 
 <script>
@@ -511,34 +511,81 @@
     
 
     async function autoLoadJson() {
-      // 同目录文件：GitHub Pages 下就是 /gw2-instabilities/instabilities.json 这种
-      const instUrl = "./instabilities.json";
-      const fractUrl = "./fractals.json";
-      const zhUrl = "./zh_dict.json";
+      // 多路径尝试：解决项目页 /repo/ 与用户页 / 的相对路径差异
+      const origin = window.location.origin;
+      const parts = window.location.pathname.split("/").filter(Boolean);
+      const repoBase = parts.length ? `/${parts[0]}/` : "/"; // project pages: /repo/..., user pages: /
+      const dirBase = new URL(".", window.location.href);    // 当前页面所在目录
 
-      try {
-        const r1 = await fetch(instUrl, { cache: "no-store" });
-        if (!r1.ok) throw new Error("instabilities.json 读取失败：" + r1.status);
-        instData = await r1.json();
+      const candidates = (filename) => ([
+        new URL(filename, dirBase).toString(),              // 当前目录
+        new URL("./" + filename, dirBase).toString(),       // 当前目录（显式）
+        origin + repoBase + filename,                       // 仓库根目录（project pages 兼容）
+        origin + "/" + filename,                            // 站点根目录（user pages 兼容）
+      ]);
 
-        // fractals.json 可选，失败也不影响查异变
-        try {
-          const r2 = await fetch(fractUrl, { cache: "no-store" });
-          if (r2.ok) fractData = await r2.json();
-        } catch (_) {}
+      async function fetchJsonWithCandidates(filename) {
+        const urls = candidates(filename);
+        let lastErr = null;
 
-        // zh_dict.json 可选：中文映射
-        try {
-          const r3 = await fetch(zhUrl, { cache: "no-store" });
-          if (r3.ok) zhDict = await r3.json();
-        } catch (_) {}
+        for (const url of urls) {
+          try {
+            const r = await fetch(url, { cache: "no-store" });
+            if (!r.ok) {
+              lastErr = new Error(`${filename} 读取失败：HTTP ${r.status}（${url}）`);
+              continue;
+            }
+            const text = await r.text();
+            try {
+              const data = JSON.parse(text);
+              return { ok: true, url, data };
+            } catch (e) {
+              lastErr = new Error(`${filename} JSON 解析失败：${e.message}（${url}）`);
+              continue;
+            }
+          } catch (e) {
+            lastErr = new Error(`${filename} 请求异常：${e.message}`);
+          }
+        }
 
-        render();
-      } catch (e) {
-        $("status").innerHTML = `状态：<span class="warn">自动加载失败</span>（可改用手动导入）`;
-        // 失败时不报错卡死，仍然允许你用“选择文件”导入
-        render();
+        return { ok: false, urls, error: lastErr };
       }
+
+      // instabilities.json（必需）
+      const instRes = await fetchJsonWithCandidates("instabilities.json");
+      if (!instRes.ok) {
+        instData = null;
+        $("status").innerHTML =
+          `状态：<span class="err">未加载数据</span><br/>` +
+          `<span class="warn">${instRes.error ? instRes.error.message : "未知错误"}</span><br/>` +
+          `<span class="muted">尝试过的路径：</span><br/>` +
+          instRes.urls.map(u => `<span class="mono">${u}</span>`).join("<br/>");
+        render();
+        return;
+      }
+      instData = instRes.data;
+
+      // fractals.json（可选）
+      const fractRes = await fetchJsonWithCandidates("fractals.json");
+      if (fractRes.ok) fractData = fractRes.data;
+
+      // zh_dict.json（可选）
+      const zhRes = await fetchJsonWithCandidates("zh_dict.json");
+      if (zhRes.ok) zhDict = zhRes.data;
+
+      const partsStatus = [];
+      partsStatus.push(`<span class="ok">已加载 instabilities.json</span>（<span class="mono">${instRes.url}</span>）`);
+      partsStatus.push(fractRes.ok
+        ? `<span class="ok">已加载 fractals.json</span>（<span class="mono">${fractRes.url}</span>）`
+        : `<span class="warn">未加载 fractals.json（不影响查询）</span>`);
+      partsStatus.push(zhRes.ok
+        ? `<span class="ok">已加载 zh_dict.json</span>（<span class="mono">${zhRes.url}</span>）`
+        : `<span class="warn">未加载 zh_dict.json（不显示中文）</span>`);
+
+      $("status").innerHTML = "状态：" + partsStatus.join("，");
+      render();
+    }
+
     } 
 
 
