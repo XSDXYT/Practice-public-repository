@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GW2 Fractal CM 异变查看器（离线）</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    body { margin: 0; background: #0b0d10; color: #e8eef6; }
+    header { padding: 14px 14px 10px; background: #11151b; position: sticky; top: 0; z-index: 9; border-bottom: 1px solid #1f2a36; }
+    h1 { font-size: 16px; margin: 0 0 8px; font-weight: 700; }
+    .row { display: grid; grid-template-columns: 1fr; gap: 10px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .card { background: #0f141b; border: 1px solid #1f2a36; border-radius: 14px; padding: 12px; }
+    label { font-size: 12px; opacity: 0.9; display: block; margin-bottom: 6px; }
+    input[type="date"], input[type="file"], input[type="text"] {
+      width: 100%; box-sizing: border-box;
+      background: #0b0f14; color: #e8eef6;
+      border: 1px solid #273447; border-radius: 10px;
+      padding: 10px 10px; font-size: 14px;
+    }
+    button {
+      border: 1px solid #2b3b52; background: #121a24; color: #e8eef6;
+      padding: 10px 10px; border-radius: 12px; font-size: 14px; font-weight: 600;
+    }
+    button:active { transform: scale(0.99); }
+    .muted { opacity: 0.75; font-size: 12px; line-height: 1.35; }
+    .warn { color: #ffd18a; }
+    .ok { color: #9ef0b1; }
+    .err { color: #ff9aa2; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .chip { font-size: 12px; border: 1px solid #2a3a51; padding: 6px 10px; border-radius: 999px; background:#0b1016; }
+    .result { padding: 12px 14px 24px; }
+    .titleLine { display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
+    .titleLine h2 { margin: 0; font-size: 14px; }
+    .titleLine .small { font-size: 12px; opacity: 0.8; }
+    ol { margin: 10px 0 0 18px; padding: 0; }
+    li { margin: 6px 0; }
+    .hr { height: 1px; background: #1f2a36; margin: 10px 0; }
+    .footer { padding: 14px; opacity: 0.75; font-size: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>GW2 Fractal CM 异变查看器（离线）</h1>
+  <div class="row">
+    <div class="card">
+      <div class="grid2">
+        <div>
+          <label>导入 instabilities.json（必需）</label>
+          <input id="fileInst" type="file" accept=".json,application/json" />
+        </div>
+        <div>
+          <label>导入 fractals.json（可选：显示碎层名字更友好）</label>
+          <input id="fileFract" type="file" accept=".json,application/json" />
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="grid2">
+        <div>
+          <label>要查询的日期</label>
+          <input id="datePick" type="date" />
+          <div class="chips">
+            <button id="btnToday" type="button">今天</button>
+            <button id="btnTomorrow" type="button">明天</button>
+          </div>
+        </div>
+        <div>
+          <label>循环起始日（Anchor）</label>
+          <input id="anchorPick" type="date" />
+          <div class="muted warn" style="margin-top:8px;">
+            说明：你的 JSON 里只有 366 天的表，所以需要一个“起始日”来对齐。<br/>
+            默认用 <span class="mono">2023-12-31</span>。如果你发现结果和游戏不一致，把这里改到正确的起始日即可。
+          </div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="grid2">
+        <div class="muted" id="status">状态：<span class="err">未加载数据</span></div>
+        <div class="muted" id="calcInfo"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="result">
+  <div class="card" id="outputCard">
+    <div class="muted">加载 JSON 后会在这里显示 6 个 CM（95~100）的异变。</div>
+  </div>
+</div>
+
+<div class="footer">
+  小贴士：你可以把这个 HTML 放在手机本地任意目录，之后直接用浏览器打开就能查。完全离线。
+</div>
+
+<script>
+  // -------------------------
+  // Helpers
+  // -------------------------
+  const $ = (id) => document.getElementById(id);
+
+  function parseJsonFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("读取失败"));
+      reader.onload = () => {
+        try { resolve(JSON.parse(reader.result)); }
+        catch (e) { reject(new Error("JSON 解析失败：" + e.message)); }
+      };
+      reader.readAsText(file, "utf-8");
+    });
+  }
+
+  function fmtDate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function toLocalDateFromInput(value) {
+    // value: "YYYY-MM-DD"
+    const [y,m,d] = value.split("-").map(Number);
+    return new Date(y, m-1, d, 0,0,0,0);
+  }
+
+  function dayDiff(a, b) {
+    // a,b are Date at midnight local
+    const ms = 24*60*60*1000;
+    return Math.round((a.getTime() - b.getTime()) / ms);
+  }
+
+  // -------------------------
+  // App State
+  // -------------------------
+  let instData = null;     // from instabilities.json
+  let fractData = null;    // from fractals.json (optional)
+
+  // Try to infer CM scale -> fractal type/name via fractals.json
+  function getFractalNameByScale(scale) {
+    if (!fractData || !Array.isArray(fractData.scales)) return null;
+    const item = fractData.scales.find(x => x.scale === scale);
+    if (!item) return null;
+    const slug = item.type;
+
+    const details = fractData.fractal_details && fractData.fractal_details[slug];
+    if (details && details.name && details.name.en) return details.name.en; // English name from file
+    return slug;
+  }
+
+  function getInstabilityName(id) {
+    if (!instData || !Array.isArray(instData.instability_details)) return `#${id}`;
+    const row = instData.instability_details[id];
+    if (!row || !row.name) return `#${id}`;
+    // 文件里通常只有 de/en/es/fr，这里默认用英文
+    return row.name.en || `#${id}`;
+  }
+
+  function render() {
+    const out = $("outputCard");
+    out.innerHTML = "";
+
+    if (!instData || !instData.instabilities) {
+      out.innerHTML = `<div class="muted">请先导入 <span class="mono">instabilities.json</span>。</div>`;
+      return;
+    }
+
+    const dateStr = $("datePick").value;
+    const anchorStr = $("anchorPick").value;
+
+    if (!dateStr || !anchorStr) {
+      out.innerHTML = `<div class="muted">请选择日期与 Anchor。</div>`;
+      return;
+    }
+
+    const date = toLocalDateFromInput(dateStr);
+    const anchor = toLocalDateFromInput(anchorStr);
+
+    // JSON 每个 scale 都是 366 天
+    const ROT = 366;
+    const delta = dayDiff(date, anchor);
+    const idx = ((delta % ROT) + ROT) % ROT;
+
+    $("calcInfo").textContent = `计算：(${dateStr} - ${anchorStr}) = ${delta} 天 → idx=${idx}（mod ${ROT}）`;
+
+    // CM scales：95~100（你这份 json 正好有 6 个，符合你说的“6个挑战模式”）
+    const cmScales = [95, 96, 97, 98, 99, 100];
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "row";
+
+    cmScales.forEach(scale => {
+      const byScale = instData.instabilities[String(scale)];
+      const triple = byScale ? byScale[idx] : null;
+
+      const name = getFractalNameByScale(scale);
+      const title = name ? `${name}` : `Scale ${scale}`;
+
+      const card = document.createElement("div");
+      card.className = "card";
+
+      const head = document.createElement("div");
+      head.className = "titleLine";
+      head.innerHTML = `<h2>${title}</h2><div class="small">CM Scale: ${scale}</div>`;
+      card.appendChild(head);
+
+      if (!triple || triple.length !== 3) {
+        const msg = document.createElement("div");
+        msg.className = "muted err";
+        msg.style.marginTop = "8px";
+        msg.textContent = "未找到该 Scale 的异变数据（检查 instabilities.json 是否完整）。";
+        card.appendChild(msg);
+      } else {
+        const ol = document.createElement("ol");
+        triple.forEach(id => {
+          const li = document.createElement("li");
+          li.textContent = `${getInstabilityName(id)}  (id=${id})`;
+          ol.appendChild(li);
+        });
+        card.appendChild(ol);
+      }
+
+      wrapper.appendChild(card);
+    });
+
+    out.appendChild(wrapper);
+
+    // status
+    $("status").innerHTML = `状态：<span class="ok">已加载 instabilities.json</span>` + (fractData ? `，<span class="ok">已加载 fractals.json</span>` : `，<span class="warn">未加载 fractals.json（仅显示 Scale）</span>`);
+  }
+
+  // -------------------------
+  // Wire up UI
+  // -------------------------
+  (function init() {
+    // default date = today
+    const now = new Date();
+    $("datePick").value = fmtDate(now);
+
+    // default anchor = 2023-12-31
+    $("anchorPick").value = "2023-12-31";
+
+    $("btnToday").addEventListener("click", () => {
+      $("datePick").value = fmtDate(new Date());
+      render();
+    });
+
+    $("btnTomorrow").addEventListener("click", () => {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      $("datePick").value = fmtDate(d);
+      render();
+    });
+
+    $("datePick").addEventListener("change", render);
+    $("anchorPick").addEventListener("change", render);
+
+    $("fileInst").addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        instData = await parseJsonFile(file);
+        render();
+      } catch (err) {
+        instData = null;
+        $("status").innerHTML = `状态：<span class="err">${err.message}</span>`;
+        render();
+      }
+    });
+
+    $("fileFract").addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) { fractData = null; render(); return; }
+      try {
+        fractData = await parseJsonFile(file);
+        render();
+      } catch (err) {
+        fractData = null;
+        $("status").innerHTML = `状态：<span class="warn">fractals.json 加载失败（不影响使用）：${err.message}</span>`;
+        render();
+      }
+    });
+    
+    
+
+    async function autoLoadJson() {
+      // 同目录文件：GitHub Pages 下就是 /gw2-instabilities/instabilities.json 这种
+      const instUrl = "./instabilities.json";
+      const fractUrl = "./fractals.json";
+
+      try {
+        const r1 = await fetch(instUrl, { cache: "no-store" });
+        if (!r1.ok) throw new Error("instabilities.json 读取失败：" + r1.status);
+        instData = await r1.json();
+
+        // fractals.json 可选，失败也不影响查异变
+        try {
+          const r2 = await fetch(fractUrl, { cache: "no-store" });
+          if (r2.ok) fractData = await r2.json();
+        } catch (_) {}
+
+        render();
+      } catch (e) {
+        $("status").innerHTML = `状态：<span class="warn">自动加载失败</span>（可改用手动导入）`;
+        // 失败时不报错卡死，仍然允许你用“选择文件”导入
+        render();
+      }
+    } 
+
+
+    autoLoadJson();   // 自动加载（在线使用）
+    render();         // 先渲染一个空壳界面
+
+  })();
+</script>
+</body>
+</html>
