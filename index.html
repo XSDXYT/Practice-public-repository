@@ -7,7 +7,8 @@
   <style>
     :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif; }
     body { margin: 0; background: #0b0d10; color: #e8eef6; }
-    header { padding: 14px 14px 10px; background: #11151b; position: sticky; top: 0; z-index: 9; border-bottom: 1px solid #1f2a36; }
+    header { padding: 14px 14px 10px; background: #11151b; position: sticky; top: 0; z-index: 9; border-bottom: 1px solid #1f2a36; max-height: 80vh; overflow: auto; -webkit-overflow-scrolling: touch; }
+    /* 手机端防“顶层遮挡”：当 header 内容过高时允许在 header 内滚动，且不会盖住下方结果 */
     h1 { font-size: 16px; margin: 0 0 8px; font-weight: 700; }
     .row { display: grid; grid-template-columns: 1fr; gap: 10px; }
     .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
